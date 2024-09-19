@@ -1,27 +1,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "hashmap/hashmap.h"
+#include "vocab/vocab.h"
 
-#include "apriori/apriori.h"
+#include "base/base.h"
+#include "morph/morph.h"
 
 
-// base endings partially overlap with correlative endings
-const char base_endings[6] = {
-	'n',    // accusative case
-	'j',    // plural form
-	'o',    // noun (or thing)
-	'a',    // adjective (or quality)
-	'e',    // adverb (or place)
-	'i',    // infinitive verb
-};
-
-struct Buffer {
+struct buffer {
 	char *content;
 	size_t len;
 };
 
-struct Buffer fread_buf(FILE *file) {
+struct Vocabs {
+	struct hashmap *base_vocab;
+	struct hashmap *morph_vocab;
+};
+
+struct buffer fread_buf(FILE *file) {
 	// fully bufferize file
     fseek(file, 0, SEEK_END);
     size_t file_len = ftell(file);
@@ -38,30 +36,78 @@ struct Buffer fread_buf(FILE *file) {
 	}
 	// set output buffer
 	setvbuf(stdout, output_buffer, _IOFBF, buffer_len);
-	//
-	struct Buffer buffer = (struct Buffer){input_buffer, buffer_len};
+	// return input buffer
+	struct buffer buffer = (struct buffer){input_buffer, buffer_len};
 	return buffer;
 }
 
-void check_apriori(char *word, struct hashmap *map) {
-	const struct word_desc *word_desc;
-
-    char word_holder[WORD_LEN];
-    strncpy(word_holder, word, WORD_LEN);
-	word_desc = hashmap_get(map, &(struct word_desc){ .word=word_holder });
-
-	if (word_desc != 0) {
-		printf("%s - %s\n", word_desc->word, word_desc->desc);
-	} else {
-		printf("%s\n", word);
+void check_suffixes(struct Pointers *ptrs, struct hashmap *morph_vocab) {
+	char *word = ptrs->word;
+	int i = ptrs->i;
+	int j = ptrs->j;
+	// word is read backwards, descriptions are written forwards
+	const struct VocabUnit *res;
+	while (i >= 0) {
+		res = hashmap_get(morph_vocab, &(struct VocabUnit){ .word=word + i });
+		if (res != 0) {
+			sprintf(ptrs->descs[j++],
+			"%s - %s (%s)", res->word, res->transl, res->def); 
+			word[i] = '\0';
+		}
+		i--;
 	}
+	sprintf(ptrs->descs[j++], "%s - ? (?)", word); 
+	ptrs->word = word;
+	ptrs->i = i;
+	ptrs->j = j;
 }
 
-// check each word in input buffer via hashmap
-void analyze_words(char *input_buffer, struct hashmap *map) {
+void morph_check(char *word, struct hashmap *morph_vocab) {
+	char (*descs)[DESC_LEN] = malloc(DESC_NUM * sizeof(*descs));
+    for (int i = 0; i < DESC_NUM; i++) {
+        descs[i][0] = '\0';
+    }
+
+	struct Pointers *ptrs = malloc(sizeof(struct Pointers));
+	ptrs->word = word; 
+	ptrs->i = strlen(word) - 1;
+	ptrs->descs = descs;
+	ptrs->j = 0;
+	
+	check_endings(ptrs);
+	// check_suffixes(ptrs, morph_vocab);
+
+	// read descriptions backwards
+	descs = ptrs->descs;
+	for (int i = DESC_NUM - 1; i >= 0; i--) {
+		if (strlen(descs[i]) != 0) {
+			printf("%s\n", descs[i]);
+		}
+	}
+
+    free(ptrs);
+}
+
+int base_check(char *word, struct hashmap *base_vocab) {
+	bool match = false;
+	const struct VocabUnit *res;
+	res = hashmap_get(base_vocab, &(struct VocabUnit){ .word=word });
+	if (res != 0) {
+		match = true;
+		printf("%s - %s (%s)\n", res->word, res->transl, res->def);
+	}
+	return match;
+}
+
+void analyze(char *input_buffer, struct Vocabs *vocabs) {
+	struct hashmap *base_vocab = vocabs->base_vocab;
+	struct hashmap *morph_vocab = vocabs->morph_vocab;
     char *word = strtok(input_buffer, " ");
     while (word != NULL) {
-		check_apriori(word, map);
+		bool match = base_check(word, base_vocab);
+		if (!match) {
+			morph_check(word, morph_vocab);
+		}
         word = strtok(NULL, " ");
     }
 }
@@ -73,20 +119,25 @@ int main() {
         perror("Error opening file");
         return 1;
     }
-	struct Buffer buffer = fread_buf(file);
+	struct buffer buffer = fread_buf(file);
 	char *input_buffer = buffer.content;
-	input_buffer[10000000000000000] = 't';
-	size_t buffer_len = buffer.len;
+	size_t input_buffer_len = buffer.len;
 
-	// get hashmap
-	struct hashmap *map = init_apriori_map();
+	// get maps and unite them
+	struct hashmap *base_vocab = init_base_vocab();
+	struct hashmap *morph_vocab = init_morph_vocab();
+	struct Vocabs *vocabs = malloc(sizeof(struct Vocabs));
+	vocabs->base_vocab = base_vocab;
+	vocabs->morph_vocab = morph_vocab;
 
+	// check each word against maps
 	size_t ret;
-	while ((ret = fread(input_buffer, 1, buffer_len, file)) > 0) {
-		analyze_words(input_buffer, map);
+	while ((ret = fread(input_buffer, 1, input_buffer_len, file)) > 0) {
+		analyze(input_buffer, vocabs);
 	}
 	fflush(stdout);
 
+	// gracefully exit
     fclose(file);
     return 0;
 }
