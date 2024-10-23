@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "hashmap/hashmap.h"
 #include "vocab/vocab.h"
@@ -9,135 +10,150 @@
 #include "morph/morph.h"
 
 
-struct buffer {
-	char *content;
-	size_t len;
-};
+void tolower_diacritic(char *str, int *idx) {
+	/* diacritic letters are represesented
+	 * by two contiguous bytes, we increment:
+	 * the second byte to make letter lowercase,
+	 * the index to get to the next letter */
 
-struct Vocabs {
-	struct hashmap *base_vocab;
-	struct hashmap *morph_vocab;
-};
-
-struct buffer fread_buf(FILE *file) {
-	// fully bufferize file
-    fseek(file, 0, SEEK_END);
-    size_t file_len = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char *input_buffer = malloc(file_len * 100);
-    char *output_buffer = malloc(file_len * 100);
-	// use static buffer size if cannot fully bufferize file
-	size_t buffer_len = file_len;
-    if (input_buffer == NULL || output_buffer == NULL) {
-		exit(0);
-		buffer_len = 32768;
-		input_buffer = malloc(buffer_len);
-		output_buffer = malloc(buffer_len);
+	unsigned char *fir = (unsigned char *) str;
+	unsigned char *sec = fir + 1;
+	switch (*fir) {
+		case 196:
+			switch (*sec) {
+				case 136:  // Ĉ
+				case 156:  // Ĝ
+				case 180:  // Ĵ
+					(*sec)++;
+					(*idx)++;
+					break;
+				default:
+					break;
+			}
+			break;
+		case 197:
+			switch (*sec) {
+				case 156:  // Ŝ
+				case 164:  // Ĥ
+				case 172:  // Ŭ
+					(*sec)++;
+					(*idx)++;
+					break;
+				default:
+					break;
+			}
+		default:
+			break;
 	}
-	// set output buffer
-	setvbuf(stdout, output_buffer, _IOFBF, buffer_len);
-	// return input buffer
-	struct buffer buffer = (struct buffer){input_buffer, buffer_len};
-	return buffer;
 }
 
-void check_suffixes(struct Pointers *ptrs, struct hashmap *morph_vocab) {
-	char *word = ptrs->word;
-	int i = ptrs->i;
-	int j = ptrs->j;
-	// word is read backwards, descriptions are written forwards
-	const struct VocabUnit *res;
-	while (i >= 0) {
-		res = hashmap_get(morph_vocab, &(struct VocabUnit){ .word=word + i });
-		if (res != 0) {
-			sprintf(ptrs->descs[j++],
-			"%s - %s (%s)", res->word, res->transl, res->def); 
-			word[i] = '\0';
-		}
-		i--;
-	}
-	sprintf(ptrs->descs[j++], "%s - ? (?)", word); 
-	ptrs->word = word;
-	ptrs->i = i;
-	ptrs->j = j;
-}
+void tolower_eo(char *str) {
+    for (int i = 0; str[i] != '\0'; i++) {
+        // convert standard letters to lowercase
+        str[i] = tolower(str[i]);
 
-void morph_check(char *word, struct hashmap *morph_vocab) {
-	char (*descs)[DESC_LEN] = malloc(DESC_NUM * sizeof(*descs));
-    for (int i = 0; i < DESC_NUM; i++) {
-        descs[i][0] = '\0';
+		// convert diacritic letters to lowercase
+		tolower_diacritic(str, &i);
     }
+}
 
-	struct Pointers *ptrs = malloc(sizeof(struct Pointers));
-	ptrs->word = word; 
-	ptrs->i = strlen(word) - 1;
-	ptrs->descs = descs;
-	ptrs->j = 0;
-	
-	check_endings(ptrs);
-	// check_suffixes(ptrs, morph_vocab);
-
-	// read descriptions backwards
-	descs = ptrs->descs;
-	for (int i = DESC_NUM - 1; i >= 0; i--) {
-		if (strlen(descs[i]) != 0) {
-			printf("%s\n", descs[i]);
+void read_defs(char (*defs)[DEF_LEN]) {
+	bool is_read = false;
+	for (int i = 0; i < DEF_NUM; i++) {
+		if (strcmp(defs[i], "") != 0) {
+			is_read = true;
+			printf("%s, ", defs[i]);
 		}
 	}
-
-    free(ptrs);
-}
-
-int base_check(char *word, struct hashmap *base_vocab) {
-	bool match = false;
-	const struct VocabUnit *res;
-	res = hashmap_get(base_vocab, &(struct VocabUnit){ .word=word });
-	if (res != 0) {
-		match = true;
-		printf("%s - %s (%s)\n", res->word, res->transl, res->def);
+	if (is_read) {
+		printf("\b\b \n");
 	}
-	return match;
 }
 
-void analyze(char *input_buffer, struct Vocabs *vocabs) {
-	struct hashmap *base_vocab = vocabs->base_vocab;
-	struct hashmap *morph_vocab = vocabs->morph_vocab;
-    char *word = strtok(input_buffer, " ");
+void clear_defs(char (*defs)[DEF_LEN]) {
+	// clean definitions
+	for (int i = 0; i < DEF_NUM; i++) {
+		strcpy(defs[i], "");
+	}
+}
+
+void analyze(char *line, char (*defs)[DEF_LEN], Maps *maps) {
+	// get maps for analysis
+	Map *base_map = maps->base_map;
+	Map *root_map = maps->root_map;
+	Map *pre_map  = maps->pre_map;
+	Map *post_map = maps->post_map;
+
+	// get next word
+	const char *delimiters = " \t\n\r,.?!\"\'";
+    char *word = strtok(line, delimiters);
+
+	bool match;
     while (word != NULL) {
-		bool match = base_check(word, base_vocab);
+
+		// get word pointer for backward reading
+		char *pword = word + strlen(word) - 1;
+
+		// convert to lowercase
+		tolower_eo(word);
+
+		// check whole word
+		// 0: whole words
+		match = check_full(word, defs, 0, base_map);
+
+		// 0  - 2: prefixes
+		// 3  - 5: roots
+		// 6  - 10: postfixes
+		// 11 - 13: endings
 		if (!match) {
-			morph_check(word, morph_vocab);
+			// check ending and root
+			pword = check_end(pword, defs, 13);
+			match = check_full(word, defs, 3, root_map);
+
+			// check prefixes, postfixes, roots
+			if (!match) {
+				word = check_f(word, defs, 0, pre_map);
+				// pword = check_b(pword, word, defs, 10, post_map);
+				pword = check_b(pword, word, defs, 5, root_map);
+			}
+
 		}
-        word = strtok(NULL, " ");
+
+		read_defs(defs);
+		clear_defs(defs);
+
+		// get next word
+        word = strtok(NULL, delimiters);
     }
 }
 
 int main() {
 	// open and read file into buffer
-    FILE *file = fopen("text.txt", "r");
-    if (file == NULL) {
+    FILE *fp = fopen("ex.txt", "r");
+    if (fp == NULL) {
         perror("Error opening file");
         return 1;
     }
-	struct buffer buffer = fread_buf(file);
-	char *input_buffer = buffer.content;
-	size_t input_buffer_len = buffer.len;
 
-	// get maps and unite them
-	struct hashmap *base_vocab = init_base_vocab();
-	struct hashmap *morph_vocab = init_morph_vocab();
-	struct Vocabs *vocabs = malloc(sizeof(struct Vocabs));
-	vocabs->base_vocab = base_vocab;
-	vocabs->morph_vocab = morph_vocab;
+	// init maps and unite them
+	Map *base_map = init_base_map();
+	Map *root_map = init_map_with(roots);
+	Map *pre_map  = init_map_with(prefixes);
+	Map *post_map = init_map_with(postfixes);
+	Maps *maps = malloc(sizeof(*maps));
+	*maps = (Maps){base_map, root_map, pre_map, post_map};
+
+	// init definitions
+	char (*defs)[DEF_LEN] = malloc(DEF_NUM * sizeof(*defs));
 
 	// check each word against maps
-	size_t ret;
-	while ((ret = fread(input_buffer, 1, input_buffer_len, file)) > 0) {
-		analyze(input_buffer, vocabs);
+	char line[4096];
+	while ((fgets(line, sizeof(line), fp)) != NULL) {
+		analyze(line, defs, maps);
 	}
 	fflush(stdout);
 
 	// gracefully exit
-    fclose(file);
+    fclose(fp);
     return 0;
 }

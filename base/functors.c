@@ -7,12 +7,12 @@ char *functors[] = {
 	"nu!",      "well / I mean",       INTJ,
     "do!",      "so",                  CONJ,
     "jes!",     "yes",                 INTJ,
-	"ne!",      "ne",                  INTJ,
+	"ne!",      "no",                  INTJ,
 	// (no flag if not in the clause beginning)
 	"nu",       "well / I mean",       CONJ,
     "do",       "so",                  ADV,
     "jes",      "yes",                 ADV,
-	"ne",       "ne",                  PART,
+	"ne",       "no",                  PART,
 	
 	
 	// NUMERAL DEPENDENT WORDS

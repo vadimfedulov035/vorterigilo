@@ -3,39 +3,49 @@
 #include <stdlib.h>
 
 #include "../hashmap/hashmap.h"
+
 #include "vocab.h"
 
 #include "../base/base.h"
 #include "../morph/morph.h"
 
 
+// comparison
 int vocab_compare(const void *a, const void *b, void *udata) {
-    const struct VocabUnit *ua = a;
-    const struct VocabUnit *ub = b;
+    const VocabUnit *ua = a;
+    const VocabUnit *ub = b;
     return strcmp(ua->word, ub->word);
 }
 
+
+// iterator
 bool vocab_iter(const void *item, void *udata) {
-    const struct VocabUnit *vocabUnit = item;
+    const VocabUnit *vocabUnit = item;
     printf("%s - %s (%s)\n",
 	vocabUnit->word, vocabUnit->transl, vocabUnit->def);
     return true;
 }
 
+
+// getter
 uint64_t vocab_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const struct VocabUnit *vocabUnit = item;
+    const VocabUnit *vocabUnit = item;
     return hashmap_sip(vocabUnit->word, strlen(vocabUnit->word), seed0, seed1);
 }
 
-void vocab_set(struct hashmap* map, char *arr[]) {
+
+// setter
+void vocab_set(Map* map, char *arr[]) {
 	for(int i = 0; arr[i] != NULL; i = i + 3) {
 		hashmap_set(map,
-		&(struct VocabUnit){ .word=arr[i], .transl=arr[i+1], .def=arr[i+2]});
+		&(VocabUnit){ .word=arr[i], .transl=arr[i+1], .def=arr[i+2]});
 	}
 }
 
-struct hashmap* init_base_vocab() {
-    struct hashmap *map = hashmap_new(sizeof(struct VocabUnit), 0, 0, 0,
+
+// base initializer (for full words)
+Map* init_base_map() {
+    Map *map = hashmap_new(sizeof(VocabUnit), 0, 0, 0,
                             vocab_hash, vocab_compare, NULL, NULL);
 
     vocab_set(map, pronouns);
@@ -47,13 +57,12 @@ struct hashmap* init_base_vocab() {
     return map;
 }
 
-struct hashmap* init_morph_vocab() {
-	struct hashmap *map = hashmap_new(sizeof(struct VocabUnit), 0, 0, 0,
+// extra initializer (for word parts)
+Map* init_map_with(char *arr[]) {
+	Map *map = hashmap_new(sizeof(VocabUnit), 0, 0, 0,
 							vocab_hash, vocab_compare, NULL, NULL);
 
-	vocab_set(map, verb_endings);
-	vocab_set(map, suffixes);
-	vocab_set(map, prefixes);
+	vocab_set(map, arr);
 
 	return map;
 }

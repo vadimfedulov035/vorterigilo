@@ -1,7 +1,11 @@
+#include <stdio.h>
+
 #include "morph.h"
+#include "../vocab/vocab.h"
+#include "../hashmap/hashmap.h"
 
 
-char *suffixes[] = {
+char *postfixes[] = {
 	// affection category
     "aĉ",   "pejorative",            "derogatory affection",
     "eg",   "augmentative",          "accentuated affection",
@@ -21,7 +25,7 @@ char *suffixes[] = {
 
 	// continuous partiality category
     "obl",  "multiple",              "complementary continuous partiality",
-	"on",   "fraction",              "fragemntary continous partiality",
+	"on",   "fraction",              "fragmentary continous partiality",
 
 	// conceptuality category
     "aĵ",   "manifestation",         "concrete conceptuality",
