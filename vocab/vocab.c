@@ -2,11 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "../hashmap/hashmap.h"
+#include "../map/map.h"
 
 #include "vocab.h"
-
-#include "../base/base.h"
 #include "../morph/morph.h"
 
 
@@ -30,36 +28,22 @@ bool vocab_iter(const void *item, void *udata) {
 // getter
 uint64_t vocab_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const VocabUnit *vocabUnit = item;
-    return hashmap_sip(vocabUnit->word, strlen(vocabUnit->word), seed0, seed1);
+    return map_sip(vocabUnit->word, strlen(vocabUnit->word), seed0, seed1);
 }
 
 
 // setter
-void vocab_set(Map* map, char *arr[]) {
+void vocab_set(struct map* map, char *arr[]) {
 	for(int i = 0; arr[i] != NULL; i = i + 3) {
-		hashmap_set(map,
+		map_set(map,
 		&(VocabUnit){ .word=arr[i], .transl=arr[i+1], .def=arr[i+2]});
 	}
 }
 
 
-// base initializer (for full words)
-Map* init_base_map() {
-    Map *map = hashmap_new(sizeof(VocabUnit), 0, 0, 0,
-                            vocab_hash, vocab_compare, NULL, NULL);
-
-    vocab_set(map, pronouns);
-    vocab_set(map, numerals);
-    vocab_set(map, correlatives);
-    vocab_set(map, functors);
-    vocab_set(map, abbreviations);
-
-    return map;
-}
-
-// extra initializer (for word parts)
-Map* init_map_with(char *arr[]) {
-	Map *map = hashmap_new(sizeof(VocabUnit), 0, 0, 0,
+// initializer
+struct map* init_map_with(char *arr[]) {
+	struct map *map = map_new(sizeof(VocabUnit), 0, 0, 0,
 							vocab_hash, vocab_compare, NULL, NULL);
 
 	vocab_set(map, arr);

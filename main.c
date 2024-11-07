@@ -3,14 +3,22 @@
 #include <string.h>
 #include <ctype.h>
 
-#include "hashmap/hashmap.h"
-#include "vocab/vocab.h"
+#include "map/map.h"
 
-#include "base/base.h"
+#include "vocab/vocab.h"
 #include "morph/morph.h"
 
 
+struct maps_struct {
+    struct map *pre_map;
+    struct map *core_map;
+    struct map *root_map;
+    struct map *post_map;
+};
+
+
 void tolower_diacritic(char *str, int *idx) {
+
 	/* diacritic letters are represesented
 	 * by two contiguous bytes, we increment:
 	 * the second byte to make letter lowercase,
@@ -47,6 +55,7 @@ void tolower_diacritic(char *str, int *idx) {
 	}
 }
 
+
 void tolower_eo(char *str) {
     for (int i = 0; str[i] != '\0'; i++) {
         // convert standard letters to lowercase
@@ -57,99 +66,137 @@ void tolower_eo(char *str) {
     }
 }
 
-void read_defs(char (*defs)[DEF_LEN]) {
-	bool is_read = false;
-	for (int i = 0; i < DEF_NUM; i++) {
-		if (strcmp(defs[i], "") != 0) {
-			is_read = true;
-			printf("%s, ", defs[i]);
-		}
+void print_res(char *dst) {
+	char *res = dst;
+	const char *pattern = "[EXC] (";
+	const int pattern_len = 7;
+
+	char *exc = strstr(res, pattern);
+	if (exc != NULL) {
+		res = exc + pattern_len;
+		res[strlen(res) - 1] = '\0';
 	}
+	printf("%s, ", res);
+}
+
+
+void print_all(char (*out)[OUT_LEN], int *l_idx, int *r_idx) {
+	bool is_read = false;
+	char *res;
+
+	// print (->)
+	for (int i = 0; i < *l_idx ; i++) {
+		is_read = true;
+		print_res(out[i]);
+		strcpy(out[i], "");
+	}
+
+	// print (<-)
+	for (int i = ++(*r_idx); i < OUT_NUM; i++) {
+		is_read = true;
+		print_res(out[i]);
+		strcpy(out[i], "");
+	}
+
 	if (is_read) {
 		printf("\b\b \n");
 	}
 }
 
-void clear_defs(char (*defs)[DEF_LEN]) {
-	// clean definitions
-	for (int i = 0; i < DEF_NUM; i++) {
-		strcpy(defs[i], "");
-	}
-}
 
-void analyze(char *line, char (*defs)[DEF_LEN], Maps *maps) {
-	// get maps for analysis
-	Map *base_map = maps->base_map;
-	Map *root_map = maps->root_map;
-	Map *pre_map  = maps->pre_map;
-	Map *post_map = maps->post_map;
+void morphemize(char *line, char (*out)[OUT_LEN], struct maps_struct *maps) {
 
-	// get next word
-	const char *delimiters = " \t\n\r,.?!\"\'";
-    char *word = strtok(line, delimiters);
+	struct map *pre_map  = maps->pre_map;
+	struct map *core_map = maps->core_map;
+	struct map *root_map = maps->root_map;
+	struct map *post_map = maps->post_map;
 
-	bool match;
-    while (word != NULL) {
+	const char *ds = " \t\n\r,.?!\"";
+	char *lword, *rword;
+	int l_idx, r_idx;
 
-		// get word pointer for backward reading
-		char *pword = word + strlen(word) - 1;
+	bool match = false;
+    for (lword = strtok(line, ds); lword != NULL; lword = strtok(NULL, ds)) {
+		rword = lword + strlen(lword) - 1;
 
-		// convert to lowercase
-		tolower_eo(word);
-
-		// check whole word
-		// 0: whole words
-		match = check_full(word, defs, 0, base_map);
-
-		// 0  - 2: prefixes
-		// 3  - 5: roots
-		// 6  - 10: postfixes
-		// 11 - 13: endings
-		if (!match) {
-			// check ending and root
-			pword = check_end(pword, defs, 13);
-			match = check_full(word, defs, 3, root_map);
-
-			// check prefixes, postfixes, roots
-			if (!match) {
-				word = check_f(word, defs, 0, pre_map);
-				// pword = check_b(pword, word, defs, 10, post_map);
-				pword = check_b(pword, word, defs, 5, root_map);
-			}
-
+		if (match) {
+			match = false;
+			print_all(out, &l_idx, &r_idx);
 		}
 
-		read_defs(defs);
-		clear_defs(defs);
+		l_idx = 0;
+		r_idx = OUT_NUM - 1;
 
-		// get next word
-        word = strtok(NULL, delimiters);
+		// core check
+		tolower_eo(lword);
+		match = check_full(lword, out, &l_idx, core_map);
+		if (match) {
+			continue;
+		}
+
+		if (strlen(lword) < 3) {
+			continue;
+		}
+
+		// root check without -j, -n
+		rword = check_end_jn(rword, out, &r_idx);
+		match = check_full(lword, out, &l_idx, root_map);
+		if (match) {
+			continue;
+		}
+
+		// root check without -o, -a, -e
+		rword = check_end_oae(rword, out, &r_idx);
+		match = check_full(lword, out, &l_idx, root_map);
+		if (match) {
+			continue;
+		}
+
+		char *lword_orig = lword;
+		char *rword_orig = rword;
+
+		// check forth prefixes, roots, postfixes
+		lword = check_forth(lword, out, &l_idx, pre_map);
+		lword = check_forth(lword, out, &l_idx, root_map);
+
+		//printf("AFTER FORTH: %s\n", lword);
+
+		// check back prefixes, roots, postfixes (reversed)
+		//rword = check_back(lword, out, &r_idx, post_map);
+		//rword = check_back(lword, out, &r_idx, root_map);
+
+		if (lword != lword_orig || rword != rword_orig) {
+			match = true;
+		} else {
+			printf("Unknown word: %s\n", lword);
+		}
     }
 }
 
+
 int main() {
-	// open and read file into buffer
-    FILE *fp = fopen("ex.txt", "r");
+    FILE *fp = fopen("text.txt", "r");
     if (fp == NULL) {
         perror("Error opening file");
         return 1;
     }
 
-	// init maps and unite them
-	Map *base_map = init_base_map();
-	Map *root_map = init_map_with(roots);
-	Map *pre_map  = init_map_with(prefixes);
-	Map *post_map = init_map_with(postfixes);
-	Maps *maps = malloc(sizeof(*maps));
-	*maps = (Maps){base_map, root_map, pre_map, post_map};
+	struct map *pre_map  = init_map_with(prefixes);
+	struct map *core_map = init_map_with(cores);
+	struct map *root_map = init_map_with(roots);
+	struct map *post_map = init_map_with(postfixes);
 
-	// init definitions
-	char (*defs)[DEF_LEN] = malloc(DEF_NUM * sizeof(*defs));
+	struct maps_struct *maps = malloc(sizeof(*maps));
+	*maps = (struct maps_struct){pre_map, core_map, root_map, post_map};
 
-	// check each word against maps
+	char (*out)[OUT_LEN] = malloc(OUT_NUM * sizeof(*out));
+	for (int i = 0; i < OUT_NUM; i++) {
+		strcpy(out[i], "");
+	}
+
 	char line[4096];
 	while ((fgets(line, sizeof(line), fp)) != NULL) {
-		analyze(line, defs, maps);
+		morphemize(line, out, maps);
 	}
 	fflush(stdout);
 

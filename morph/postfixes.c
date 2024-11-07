@@ -1,8 +1,4 @@
-#include <stdio.h>
-
 #include "morph.h"
-#include "../vocab/vocab.h"
-#include "../hashmap/hashmap.h"
 
 
 char *postfixes[] = {
@@ -41,7 +37,7 @@ char *postfixes[] = {
 	"iĉ",   "male",                  "male gender",
 
 	// parentiality category
-	"id",   "kid",                   "direct parentiality",
+	"id",   "kid",                   "direct descendance",
 
 	// identity category 
 	"an",   "member",                "group identity",

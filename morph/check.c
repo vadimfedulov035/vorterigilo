@@ -1,159 +1,184 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../hashmap/hashmap.h"
+#include "../map/map.h"
 
 #include "../vocab/vocab.h"
-#include "../base/base.h"
 #include "morph.h"
 
 
-bool check_full(char *word, char (*defs)[DEF_LEN], int i, Map *map) {
-	bool match = false;
-
+bool check_full(char *word, char (*out)[OUT_LEN], int *i, struct map *map) {
     const VocabUnit *res;
-	res = hashmap_get(map, &(VocabUnit){ .word=word});
-	match = (res != 0);
+	res = map_get(map, &(VocabUnit){ .word=word});
+	bool match = (res != 0);
 	if (match) {
-		sprintf(defs[i++], "%s - %s (%s)", res->word, res->transl, res->def);
+		sprintf(out[(*i)++],
+				"%s [%s] (%s)",
+				res->word, res->transl, res->def);
 	}
 
 	return match;
 }
 
 
-char *check_category(char *pword, char (*defs)[DEF_LEN], int *i) {
+char *check_end_jn(char *rword, char (*out)[OUT_LEN], int *i) {
 
-	/* indicate case (0/-n) and number (0/-j)
-	 * for nouns (-o) and adjectives (-a) */
+	/* indicate case (-/-n) and number (-/-j) categories *
+	 * for nouns (-o) and adjectives (-a), adverbs (-e)  *
+	 * can only have (-n) case indicating motion         */
 
-	// category flags
+	char *rword_orig = rword;
+
 	bool acc = false;
 	bool plur = false;
-	// loop flag
-	bool done = false;
-	while (!done) {
-		switch(*pword) {
+	for (bool done = false; !done; rword--) {
+		switch (*rword) {
 			case 'n':
 				acc = true;
-				sprintf(defs[(*i)--], "-%c (accusative case)", *pword); 
-				pword--;
+				sprintf(out[(*i)--], ACC_CASE);
 				break;
 			case 'j':
 				plur = true;
-				sprintf(defs[(*i)--], "-%c (plural number)", *pword); 
-				pword--;
+				sprintf(out[(*i)--], PLUR_NUM);
 				break;
 			case 'o':
 			case 'a':
 				if (!acc) {
-					sprintf(defs[(*i)--], "- (nominative case)"); 
+					sprintf(out[(*i)--], NOM_CASE);
 				}
 				if (!plur) {
-					sprintf(defs[(*i)--], "- (singular number)"); 
+					sprintf(out[(*i)--], SING_NUM);
 				}
-			// fall through without decrement
-			// for world class check later
 			default:
 				done = true;
+				rword[1] = '\0';
 				break;
 		}
 	}
-	
-	return pword;
+
+	return ++rword;
 }
 
 
-int check_wc_base(char ch) {
-	// error value by default
-	int wc = -1;
-	// base endings (last ending demands another check)
-	const char endings[] = {'o', 'a', 'e', 'i', 'u', 's'};
-	for (int i = 0; i < 6; i++) {
-		if (ch == endings[i]) {
-			wc = i;
-		}
+char *check_end_oae(char *rword, char (*out)[OUT_LEN], int *i) {
+
+	/* indicate word class                           *
+	 * for nouns (-o), adjectives (-a), adverbs (-e) *
+	 * and abbreviations (-')                        */
+
+	char *rword_orig = rword;
+
+	char *dst = out[(*i)--];
+	switch (*rword--) {
+		case 'o':
+			sprintf(dst, NOUN_WC); 
+			break;
+		case 'a':
+			sprintf(dst, ADJ_WC); 
+			break;
+		case 'e':
+			sprintf(dst, ADV_WC); 
+			break;
+		case '\'':
+			sprintf(dst, ABBR); 
+			break;
+		default:
+			rword++;
+			i++;
+			break;
 	}
-	return wc;
+	rword[1] = '\0';
+
+	return rword;
 }
 
 
-int check_wc_ext(char ch) {
-	// error value by default
-	int wc = -1;
-	// extended ending
-	const char endings[] = {'u', 'i', 'a', 'o'};
-	for (int i = 0; i < 6; i++) {
-		if (ch == endings[i]) {
-			wc = 5 + i;
-		}
+bool check_verb_end_2(char *rword, char *dst) {
+	bool match = true;
+
+	// roll through pre-last character
+	switch (*rword) {
+		case 'i':
+			sprintf(dst, PAST_VERB); 
+			break;
+		case 'a':
+			sprintf(dst, PRES_VERB); 
+			break;
+		case 'o':
+			sprintf(dst, FUTUR_VERB); 
+			break;
+		case 'u':
+			sprintf(dst, COND_VERB); 
+			break;
+		default:
+			match = false;
+			break;
 	}
-	return wc;
+
+	return match;
 }
 
 
-char *check_word_class(char *pword, char (*defs)[DEF_LEN], int *i) {
+bool check_verb_end_1(char *rword, char *dst) {
+	bool match = true;
 
-	/* indicate word class based on 1 or 2 character endings
-	 * word class 5 has subclasses and is redefined later    */
+	// roll through last character
+	switch (*rword) {
+		case 'i':
+			sprintf(dst, INF_VERB); 
+			break;
+		case 'u':
+			sprintf(dst, VOL_VERB); 
+			break;
+		case 's':
+			match = check_verb_end_2(--rword, dst);
+			break;
+		default:
+			match = false;
+			break;
+	}
 
-	// initialize word classes
-	char *wc_arr[] = {
-		NOUN, ADJ, ADV, INF VERB, VOL VERB,           // base     (1 char)
-		COND VERB, PAST VERB, PRES VERB, FUTUR VERB,  // extended (2 char)
-	};
+	return match;
+}
 
-	// check for base endings
-	int wc = check_wc_base(*pword);
-	// check for extended endings
-	if (wc == 5) {
-		wc = check_wc_ext(*(--pword));
-	// or terminate after one character
+
+char *check_verb_end(char *rword, char (*out)[OUT_LEN], int *i) {
+
+	// check ending and terminate matched part
+	char *dst = out[(*i)--];
+	bool match = check_verb_end_1(rword, dst);
+	if (match) {
+		*rword = '\0';
+		rword--;
+	// increment after extra decrement
 	} else {
-		pword[1] = '\0';
+		i++;
 	}
 
-	// print on match (no pword decrement)
-	if (wc != -1) {
-		sprintf(defs[(*i)--], "-%s (%s)", pword, wc_arr[wc]); 
-		*pword = '\0';
-	}
-
-	return pword;
+	return rword;
 }
 
 
-char *check_end(char *pword, char (*defs)[DEF_LEN], int i) {
-	pword = check_category(pword, defs, &i);
-	pword = check_word_class(pword, defs, &i);
-	return pword;
-}
+char *check_forth(char *word, char (*out)[OUT_LEN], int *i, struct map *map) {
 
-
-char *check_f(char *word, char (*defs)[DEF_LEN], int i, Map *map) {
-	bool match = false;
-
-    // word is read forwards
-	// descriptions are written forwards
-	// word end pointer stays valid
+	// check forth ungreedy (buffer smaller -> partial strcpy)
     const VocabUnit *res;
-	char word_tmp[128];
-	char *word_end = word + strlen(word);
-    for (int j = 0; word + j < word_end; j++) {
-		// copy word
-		strcpy(word_tmp, word);
-		// terminate copied word after i characters
-		word_tmp[j] = '\0';
-		// check terminated copy
-        res = hashmap_get(map, &(VocabUnit){ .word=word_tmp });
-		match = (res != 0);
-        if (match) {
-            sprintf(defs[i++], "%s - %s (%s)",
+    for (size_t n = strlen(word); n > 0; n--) {
+
+		// set buffer with n characters
+		char buf[n + 1];
+		strcpy(buf, word);
+		buf[n] = '\0';
+
+        res = map_get(map, &(VocabUnit){ .word=buf });
+        if (res != 0) {
+            sprintf(out[(*i)++], "%s [%s] (%s)",
 					res->word, res->transl, res->def);
-			// shift until not matched part
-			word = word + j;
-			// reset index 
-			j = 0;
+			// reset
+			word = word + n;
+			n = strlen(word);
+			// make up extra dec
+			n++;
         }
     }
 
@@ -161,23 +186,33 @@ char *check_f(char *word, char (*defs)[DEF_LEN], int i, Map *map) {
 }
 
 
-char *check_b(char *pword, char *word, char (*defs)[DEF_LEN], int i, Map *map) {
-	bool match = false;
+char *check_back(char *word, char (*out)[OUT_LEN], int *i, struct map *map) {
 
-    // word is read backwards
-	// descriptions are written forwards
-	// word pointer serves as border
+	// memorize word pointer
+	char *lword = word;
+
+    // check back ungreedy (buffer smaller -> partial strcpy) 
     const struct VocabUnit *res;
-    while (--pword >= word) {
-        res = hashmap_get(map, &(VocabUnit){ .word=pword });
-		match = (res != 0);
-        if (match) {
-			match = true;
-            sprintf(defs[i--], "%s - %s (%s)",
+	for (size_t n = strlen(word); n > 0; n--, word++) {
+
+		// set buffer with n characters
+		char buf[n + 1];
+		strcpy(buf, word);
+		buf[n] = '\0';
+
+        res = map_get(map, &(VocabUnit){ .word=buf });
+        if (res != 0) {
+            sprintf(out[(*i)--], "%s [%s] (%s)",
 					res->word, res->transl, res->def);
-            *pword = '\0';
+            *(word) = '\0';
+			// reset
+			word = lword;
+			n = strlen(word);
+			// make up extra dec
+			word--;
+			n++;
         }
     }
 
-	return pword;
+	return word;
 }
